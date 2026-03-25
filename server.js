@@ -19,7 +19,7 @@ const EMAIL_PASS = "dyfqbxvgivfpkcdk";
 
 const JWT_SECRET = "9abecaaef3bfab885d54e2a6c696a8fb725f459716e6fba7a3474a0e5439746c";
 
-const BACKEND_URL = "http://localhost:3000";
+const BACKEND_URL = "https://adv-backend-two.vercel.app";
 const FRONTEND_URL = "http://localhost:4200";
 
 // ─── CONFIG ─────────────────────────────────────────────
