@@ -221,10 +221,11 @@ app.get('/api/me', requireAuth, (req, res) => {
 });
 
 // ─── CRUD USUARIOS (SIN AUTH) ────────────────────────────
-// ✅ CAMBIO: se eliminó requireAuth de estas tres rutas
 app.get('/api/usuarios', async (req, res) => {
   try {
-    const result = await pool.query(`SELECT id, nombre, apellidos, correo, created_at FROM usuarios ORDER BY id`);
+    const result = await pool.query(
+      `SELECT id, nombre, apellidos, correo, activo, creado_en FROM usuarios ORDER BY id`
+    );
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -244,7 +245,7 @@ app.post('/api/usuarios', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO usuarios (nombre, apellidos, correo, contrasena)
-       VALUES ($1, $2, $3, $4) RETURNING id, nombre, apellidos, correo, created_at`,
+       VALUES ($1, $2, $3, $4) RETURNING id, nombre, apellidos, correo, activo, creado_en`,
       [nombre, apellidos || null, correo, hash]
     );
 
