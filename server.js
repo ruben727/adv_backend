@@ -1,5 +1,5 @@
 // server.js
-// npm install express pg bcrypt nodemailer jsonwebtoken cors
+// npm install express pg bcrypt nodemailer jsonwebtoken cors @supabase/supabase-js multer
 
 const express = require('express');
 const { Pool } = require('pg');
@@ -8,19 +8,20 @@ const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
+const multer = require('multer');
 
 const app = express();
 
-// ─── VARIABLES (ANTES .env) ─────────────────────────────
+// ─── VARIABLES ──────────────────────────────────────────
 const DATABASE_URL = "postgresql://postgres.mawkbhhmjgbxqdqhvfyd:AguaDeVida123@aws-1-us-east-1.pooler.supabase.com:5432/postgres";
-
 const EMAIL_USER = "rubenmendozad2007@gmail.com";
 const EMAIL_PASS = "dyfqbxvgivfpkcdk";
-
 const JWT_SECRET = "9abecaaef3bfab885d54e2a6c696a8fb725f459716e6fba7a3474a0e5439746c";
-
 const BACKEND_URL = "https://adv-backend-two.vercel.app";
 const FRONTEND_URL = "https://frontend-nine-delta-33.vercel.app/";
+const SUPABASE_URL = "https://mawkbhhmjgbxqdqhvfyd.supabase.co";
+const SUPABASE_KEY = "sb_secret_JFt5f0Ol3jXeW2zIuqs2xA_4HDU13y-";
 
 // ─── CONFIG ─────────────────────────────────────────────
 app.use(express.json());
@@ -34,6 +35,10 @@ const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+// ─── SUPABASE ────────────────────────────────────────────
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const upload = multer({ storage: multer.memoryStorage() });
 
 // ─── MAIL ───────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
@@ -266,6 +271,74 @@ app.delete('/api/usuarios/:id', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error al eliminar usuario.' });
+  }
+});
+
+// ─── CRUD PREDICAS (SIN AUTH) ────────────────────────────
+app.post('/api/predicas/imagen', upload.single('imagen'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ message: 'No se envió imagen.' });
+
+    const ext = file.originalname.split('.').pop();
+    const filename = `predica_${Date.now()}.${ext}`;
+
+    const { error } = await supabase.storage
+      .from('predicas')
+      .upload(filename, file.buffer, { contentType: file.mimetype });
+
+    if (error) throw error;
+
+    const { data } = supabase.storage.from('predicas').getPublicUrl(filename);
+
+    res.json({ url: data.publicUrl });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al subir imagen.' });
+  }
+});
+
+app.get('/api/predicas', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, titulo, predicador, youtube_url, imagen_url, fecha, activo, creado_en
+       FROM predicas ORDER BY fecha DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al obtener prédicas.' });
+  }
+});
+
+app.post('/api/predicas', async (req, res) => {
+  const { titulo, predicador, youtube_url, imagen_url, fecha } = req.body;
+
+  if (!titulo || !predicador || !youtube_url || !imagen_url || !fecha) {
+    return res.status(400).json({ message: 'Todos los campos son obligatorios.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO predicas (titulo, predicador, youtube_url, imagen_url, fecha)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, titulo, predicador, youtube_url, imagen_url, fecha, activo, creado_en`,
+      [titulo, predicador, youtube_url, imagen_url, fecha]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al crear prédica.' });
+  }
+});
+
+app.delete('/api/predicas/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM predicas WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Prédica eliminada correctamente.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al eliminar prédica.' });
   }
 });
 
