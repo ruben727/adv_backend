@@ -96,7 +96,6 @@ app.post('/api/login', async (req, res) => {
 
     const confirmLink = `${BACKEND_URL}/api/confirm/${confirmToken}`;
 
-    // ─── CORREO MEJORADO ─────────────────────────────────
     await transporter.sendMail({
       from: `"Agua de Vida" <${EMAIL_USER}>`,
       to: user.correo,
@@ -111,13 +110,11 @@ app.post('/api/login', async (req, res) => {
         <body style="margin:0;padding:0;font-family:'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:#f0f4f8;">
           <div style="max-width:560px;margin:40px auto;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 35px -10px rgba(0,0,0,0.1);">
             
-            <!-- Header con gradiente -->
             <div style="background:linear-gradient(135deg,#0f2b3d,#1a4d6f);padding:32px 24px;text-align:center;">
               <h1 style="margin:0;font-size:28px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">🌊 Agua de Vida</h1>
               <p style="margin:12px 0 0;font-size:15px;color:#b8deff;font-weight:500;">Panel Administrativo</p>
             </div>
             
-            <!-- Contenido -->
             <div style="padding:40px 32px;">
               <h2 style="margin:0 0 8px;font-size:24px;font-weight:600;color:#1a2c3e;">Hola, ${user.nombre} ${user.apellidos || ''} 👋</h2>
               <p style="color:#5a6e7c;font-size:16px;line-height:1.5;margin-bottom:28px;">
@@ -148,7 +145,6 @@ app.post('/api/login', async (req, res) => {
               </p>
             </div>
             
-            <!-- Footer -->
             <div style="background:#f8fafc;padding:20px 32px;text-align:center;border-top:1px solid #e2e8f0;">
               <p style="margin:0;font-size:12px;color:#8a99aa;">
                 © 2025 Agua de Vida - Panel Administrativo
@@ -211,7 +207,6 @@ app.get('/api/confirm/:token', async (req, res) => {
       { expiresIn: '8h' }
     );
 
-    // Redirigir con el token al frontend
     res.redirect(`${FRONTEND_URL}/admin/panel?token=${sessionToken}`);
 
   } catch (err) {
@@ -225,8 +220,9 @@ app.get('/api/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
-// ─── CRUD USUARIOS ──────────────────────────────────────
-app.get('/api/usuarios', requireAuth, async (req, res) => {
+// ─── CRUD USUARIOS (SIN AUTH) ────────────────────────────
+// ✅ CAMBIO: se eliminó requireAuth de estas tres rutas
+app.get('/api/usuarios', async (req, res) => {
   try {
     const result = await pool.query(`SELECT id, nombre, apellidos, correo, created_at FROM usuarios ORDER BY id`);
     res.json(result.rows);
@@ -236,7 +232,7 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/usuarios', requireAuth, async (req, res) => {
+app.post('/api/usuarios', async (req, res) => {
   const { nombre, apellidos, correo, contrasena } = req.body;
 
   if (!nombre || !correo || !contrasena) {
@@ -262,7 +258,7 @@ app.post('/api/usuarios', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/usuarios/:id', requireAuth, async (req, res) => {
+app.delete('/api/usuarios/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM usuarios WHERE id = $1', [req.params.id]);
     res.json({ message: 'Usuario eliminado correctamente.' });
