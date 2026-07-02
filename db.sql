@@ -63,3 +63,21 @@ CREATE OR REPLACE TRIGGER trg_predicas_updated_at
 BEFORE UPDATE ON predicas
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
+
+
+
+CREATE TABLE IF NOT EXISTS avisos (
+  id             SERIAL PRIMARY KEY,
+  titulo         VARCHAR(255)  NOT NULL,
+  descripcion    TEXT          NOT NULL,
+  imagen_url     VARCHAR(500)  NOT NULL,
+  fecha          DATE          NOT NULL,
+  activo         BOOLEAN       NOT NULL DEFAULT TRUE,
+  creado_en      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE OR REPLACE TRIGGER trg_avisos_updated_at
+BEFORE UPDATE ON avisos
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();

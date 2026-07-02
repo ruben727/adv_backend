@@ -1,5 +1,7 @@
 // server.js
-// npm install express pg bcrypt nodemailer jsonwebtoken cors
+// npm install express pg bcrypt nodemailer jsonwebtoken cors @elastic/elasticsearch @supabase/supabase-js multer dotenv
+
+require('dotenv').config();
 
 const express = require('express');
 const { Pool } = require('pg');
@@ -8,6 +10,9 @@ const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const cors = require('cors');
+const { Client: ElasticClient } = require('@elastic/elasticsearch');
+const { createClient } = require('@supabase/supabase-js');
+const multer = require('multer');
 
 const app = express();
 
@@ -34,6 +39,55 @@ const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+// ─── ELASTICSEARCH ───────────────────────────────────────
+const ES_INDEX = process.env.ELASTIC_INDEX || 'busqueda';
+const es = new ElasticClient({ node: process.env.ELASTIC_NODE || 'http://localhost:9200' });
+
+async function indexDoc(id, doc) {
+  try {
+    await es.index({ index: ES_INDEX, id, document: doc, refresh: true });
+  } catch (err) {
+    console.error('Error indexando en Elasticsearch:', err.message);
+  }
+}
+
+async function deleteDoc(id) {
+  try {
+    await es.delete({ index: ES_INDEX, id, refresh: true });
+  } catch (err) {
+    if (err.meta?.statusCode !== 404) {
+      console.error('Error borrando de Elasticsearch:', err.message);
+    }
+  }
+}
+
+function formatFecha(fecha) {
+  if (!fecha) return '';
+  try {
+    return new Date(fecha).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+// ─── SUPABASE STORAGE (imágenes de predicas/avisos) ──────
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const upload = multer({ storage: multer.memoryStorage() });
+
+async function subirImagenA(bucket, file) {
+  const ext = file.originalname.split('.').pop();
+  const filename = `${bucket}_${Date.now()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from(bucket)
+    .upload(filename, file.buffer, { contentType: file.mimetype });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(filename);
+  return data.publicUrl;
+}
 
 // ─── MAIL ───────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
@@ -269,6 +323,204 @@ app.delete('/api/usuarios/:id', async (req, res) => {
   }
 });
 
+// ─── CRUD PREDICAS (SIN AUTH) ────────────────────────────
+app.post('/api/predicas/imagen', upload.single('imagen'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No se envió imagen.' });
+    const url = await subirImagenA('predicas', req.file);
+    res.json({ url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al subir imagen.' });
+  }
+});
+
+app.get('/api/predicas', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, titulo, predicador, youtube_url, imagen_url, fecha, activo, creado_en
+       FROM predicas ORDER BY fecha DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al obtener prédicas.' });
+  }
+});
+
+app.post('/api/predicas', async (req, res) => {
+  const { titulo, predicador, youtube_url, imagen_url, fecha } = req.body;
+
+  if (!titulo || !predicador || !youtube_url || !imagen_url || !fecha) {
+    return res.status(400).json({ message: 'Todos los campos son obligatorios.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO predicas (titulo, predicador, youtube_url, imagen_url, fecha)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, titulo, predicador, youtube_url, imagen_url, fecha, activo, creado_en`,
+      [titulo, predicador, youtube_url, imagen_url, fecha]
+    );
+
+    const predica = result.rows[0];
+    indexDoc(`predica-${predica.id}`, {
+      tipo: 'predica',
+      titulo: predica.titulo,
+      predicador: predica.predicador,
+      descripcion: `Predicador: ${predica.predicador}`,
+      contenido: '',
+      route: '/predicas',
+      extraInfo: formatFecha(predica.fecha),
+      fecha: predica.fecha,
+      activo: predica.activo
+    });
+
+    res.status(201).json(predica);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al crear prédica.' });
+  }
+});
+
+app.delete('/api/predicas/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM predicas WHERE id = $1', [req.params.id]);
+    deleteDoc(`predica-${req.params.id}`);
+    res.json({ message: 'Prédica eliminada correctamente.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al eliminar prédica.' });
+  }
+});
+
+// ─── CRUD AVISOS (SIN AUTH) ───────────────────────────────
+app.post('/api/avisos/imagen', upload.single('imagen'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No se envió imagen.' });
+    const url = await subirImagenA('avisos', req.file);
+    res.json({ url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al subir imagen.' });
+  }
+});
+
+app.get('/api/avisos', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, titulo, descripcion, imagen_url, fecha, activo, creado_en
+       FROM avisos ORDER BY fecha DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al obtener avisos.' });
+  }
+});
+
+app.post('/api/avisos', async (req, res) => {
+  const { titulo, descripcion, imagen_url, fecha } = req.body;
+
+  if (!titulo || !descripcion || !imagen_url || !fecha) {
+    return res.status(400).json({ message: 'Todos los campos son obligatorios.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO avisos (titulo, descripcion, imagen_url, fecha)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, titulo, descripcion, imagen_url, fecha, activo, creado_en`,
+      [titulo, descripcion, imagen_url, fecha]
+    );
+
+    const aviso = result.rows[0];
+    indexDoc(`aviso-${aviso.id}`, {
+      tipo: 'aviso',
+      titulo: aviso.titulo,
+      predicador: '',
+      descripcion: aviso.descripcion,
+      contenido: '',
+      route: '/avisos',
+      extraInfo: formatFecha(aviso.fecha),
+      fecha: aviso.fecha,
+      activo: aviso.activo
+    });
+
+    res.status(201).json(aviso);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al crear aviso.' });
+  }
+});
+
+app.delete('/api/avisos/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM avisos WHERE id = $1', [req.params.id]);
+    deleteDoc(`aviso-${req.params.id}`);
+    res.json({ message: 'Aviso eliminado correctamente.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error al eliminar aviso.' });
+  }
+});
+
+// ─── BUSCADOR (Elasticsearch) ─────────────────────────────
+app.get('/api/search', async (req, res) => {
+  const q = (req.query.q || '').toString().trim();
+  if (q.length < 2) return res.json([]);
+
+  try {
+    const result = await es.search({
+      index: ES_INDEX,
+      size: 8,
+      query: {
+        bool: {
+          must: {
+            multi_match: {
+              query: q,
+              fields: ['titulo^3', 'predicador^2', 'descripcion', 'contenido'],
+              fuzziness: 'AUTO',
+              prefix_length: 2
+            }
+          },
+          must_not: { term: { activo: false } }
+        }
+      },
+      highlight: {
+        fields: { titulo: {}, descripcion: {} }
+      }
+    });
+
+    const hits = result.hits.hits;
+    const maxScore = result.hits.max_score || 1;
+
+    const results = hits.map(hit => {
+      const src = hit._source;
+      const fragments = Object.values(hit.highlight || {}).flat();
+      const matchedTerms = [...new Set(
+        fragments.flatMap(frag => [...frag.matchAll(/<em>(.*?)<\/em>/g)].map(m => m[1].toLowerCase()))
+      )];
+
+      return {
+        id: hit._id,
+        title: src.titulo,
+        description: src.descripcion || '',
+        route: src.route,
+        type: src.tipo,
+        score: Math.min(100, Math.round((hit._score / maxScore) * 100)),
+        matchedTerms,
+        extraInfo: src.extraInfo || ''
+      };
+    });
+
+    res.json(results);
+  } catch (err) {
+    console.error('Error en /api/search:', err);
+    res.status(500).json({ message: 'Error al buscar.' });
+  }
+});
+
 // ─── HEALTH CHECK ───────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -276,5 +528,11 @@ app.get('/api/health', (req, res) => {
 
 // ─── EXPORT PARA VERCEL ─────────────────────────────────
 module.exports = app;
+
+// ─── SERVIDOR LOCAL (Vercel importa `app` sin ejecutar esto) ──
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => console.log(`Backend escuchando en http://localhost:${PORT}`));
+}
 
 

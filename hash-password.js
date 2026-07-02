@@ -1,12 +1,14 @@
 const bcrypt = require('bcrypt');
 
-const password = process.argv[2]; // toma el argumento de la línea de comandos
+const password = 'RubenMendoza';
 const saltRounds = 10;
 
-bcrypt.hash(password, saltRounds, function(err, hash) {
-  if (err) {
-    console.error('Error al generar el hash:', err);
-    return;
-  }
-  console.log('Hash generado:', hash);
+bcrypt.hash(password, saltRounds, (err, hash) => {
+    if (err) {
+        console.error('Error al generar el hash:', err);
+        return;
+    }
+
+    console.log('Contraseña:', password);
+    console.log('Hash generado:', hash);
 });
